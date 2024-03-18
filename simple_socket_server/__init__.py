@@ -5,6 +5,7 @@ Copyright (c) 2023 webtoucher
 Distributed under the BSD 3-Clause license. See LICENSE for more info.
 """
 
+# coding=utf8
 import queue
 import select
 import socket
@@ -39,6 +40,12 @@ class SimpleSocketServer(EventBus):
         """Run socket server."""
         while True:
             if self.__initialized:
+                # Clean sockets
+                for sock in list(self.__inputs):
+                    if sock.fileno() == -1: self.__inputs.remove(sock)
+                for sock in list(self.__outputs):
+                    if sock.fileno() == -1: self.__outputs.remove(sock)
+
                 sock_to_read, sock_to_write, sock_errors = select.select(
                     self.__inputs,
                     self.__outputs,
@@ -90,11 +97,12 @@ class SimpleSocketServer(EventBus):
         self.emit('start', self.__host, self.__port)
 
     def __read_socket(self, sockets_to_read: list):
-        for sock in sockets_to_read:
-            if sock is self.server_socket:
-                self.__server_socket(sock)
-            else:
-                self.__receive_message(sock)
+        for sock in list(sockets_to_read):
+            if sock.fileno() == -1:
+                sockets_to_read.remove(sock)
+                continue
+            if sock is self.server_socket: self.__server_socket(sock)
+            else: self.__receive_message(sock)
 
     def __server_socket(self, server_socket):
         client_socket, client_address = server_socket.accept()
@@ -109,11 +117,17 @@ class SimpleSocketServer(EventBus):
             data_from_client = sock.recv(1024)
             if data_from_client:
                 self.emit('message', sock, self.__clients[sock], data_from_client)
-        except ConnectionResetError:
+        except Exception as e:
             self.__delete_socket_connection(sock)
+            print('Connection issue')
+            print(e)
+
 
     def __write_socket(self, socket_to_write):
-        for sock in socket_to_write:
+        for sock in list(socket_to_write):
+            if sock.fileno() == -1:
+                socket_to_write.remove(sock)
+                continue
             echo_message = ''.encode()
             try:
                 if sock.fileno() > 0:
@@ -133,7 +147,10 @@ class SimpleSocketServer(EventBus):
                 self.__delete_socket_connection(sock)
 
     def __exception_socket(self, socket_errors):
-        for sock in socket_errors:
+        for sock in list(socket_errors):
+            if sock.fileno() == -1:
+                socket_errors.remove(sock)
+                continue
             self.__delete_socket_connection(sock)
             print('trying to delete server socket')
             if sock is self.server_socket:
@@ -144,6 +161,7 @@ class SimpleSocketServer(EventBus):
                 self.__initialized = False
 
     def __delete_socket_connection(self, sock):
+        if not(sock): return
         if sock in self.__inputs:
             self.__inputs.remove(sock)
         self.__messages.pop(sock, None)
@@ -151,7 +169,6 @@ class SimpleSocketServer(EventBus):
             self.__outputs.remove(sock)
         self.emit('disconnect', sock, self.__clients[sock])
         sock.close()
-
 
 if __name__ == '__main__':
     pass
